@@ -1,13 +1,9 @@
 CREATE DATABASE emp_depts;
 USE emp_depts;
-
-#5. Ограничения (CONSTRAINTS). Заявки INSERT, UPDATE, DELETE 
-
 CREATE TABLE departments(
 id INT AUTO_INCREMENT PRIMARY KEY,
 name VARCHAR(200) NOT NULL
 ) ENGINE = InnoDB;
-
 CREATE TABLE employees(
 id INT AUTO_INCREMENT PRIMARY KEY,
 name VARCHAR(200) NOT NULL,
@@ -17,12 +13,10 @@ department_id INT,
 CONSTRAINT FOREIGN KEY (department_id) REFERENCES departments(id)
 ON DELETE SET NULL ON UPDATE CASCADE
 );
-
 INSERT INTO departments (`name`)
 VALUES ('Човешки ресурси'),
 ('Финансов анализ'),
 ('Кредитна администрация');
-
 INSERT INTO employees (name, egn, address, department_id)
 VALUES ('Иван Райнов', '7412051425', 'София-Младост', '1'),
 ('Георги Георгиев', '7512032154', 'София - Изток 23', '1'),
