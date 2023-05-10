@@ -7,7 +7,7 @@ CREATE TABLE users (
 id INT AUTO_INCREMENT NOT NULL,
 name VARCHAR(255) NOT NULL UNIQUE,	#every username must be unique
 password VARCHAR(255) NOT NULL,
-age INT CHECK(age>=12),
+yearOfBirthday YEAR NOT NULL,
 PRIMARY KEY(id)
 );
 
@@ -53,17 +53,17 @@ CONSTRAINT FOREIGN KEY (id_hero) REFERENCES heroes(id) ON DELETE CASCADE,	#ак�
 CONSTRAINT FOREIGN KEY (id_mission) REFERENCES missions(id) ON DELETE SET NULL	#ако изтрием мисия, героя трябва да се запази че е участвал в дадена мисия, дори вече тя да не същшествува
 );
 
-INSERT INTO users (name, password, age) VALUES
-('Alice', 'password1', 14),
-('Bob', 'password2', 12),
-('Charlie', 'password3', 19),
-('David', 'password4', 21),
-('Eve', 'password5', 13),
-('Frank', 'password6', 14),
-('Grace', 'password7', 39),
-('Hannah', 'password8', 64),
-('Isabella', 'password9', 15),
-('Jack', 'password10', 16);
+INSERT INTO users (name, password, yearOfBirthday) VALUES
+('Alice', 'password1', 2000),
+('Bob', 'password2', 2015),
+('Charlie', 'password3', 2009),
+('David', 'password4', 2011),
+('Eve', 'password5', 2012),
+('Frank', 'password6', 2013),
+('Grace', 'password7', 2002),
+('Hannah', 'password8', 1999),
+('Isabella', 'password9', 2001),
+('Jack', 'password10', 2020);
 
 INSERT INTO heroes (name, blood, atack, magicPoints, killedMonsters, isWizard, frozenAtack_protection, user_id)
 VALUES
@@ -424,6 +424,165 @@ SELECT * FROM monsters;
 
 SELECT * FROM killing_monsters;
 
+#тригер, който не позволява един потребител да има повече от 6 героя:
+SELECT heroes.user_id, COUNT(heroes.id) FROM heroes
+GROUP BY heroes.user_id;
+
+DELIMITER |
+CREATE TRIGGER destrictHeroesCount BEFORE INSERT ON heroes
+FOR EACH ROW
+BEGIN
+DECLARE br INT;
+SELECT COUNT(*) INTO br FROM heroes WHERE user_id = NEW.user_id;
+IF(br>=6)
+THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = "you haven'y got more than 6 heroes!";
+END IF;
+END |
+DELIMITER ;
+
+INSERT INTO heroes (name, blood, atack, magicPoints, killedMonsters, isWizard, frozenAtack_protection, user_id) 
+VALUES ("heroname", 100, 100, 100, 0, 0, 100, 4);
+
+#Да се направи тригер, който автоматично да увеличава броя на убитите монстри на героя, когато той убие нов монстър.
+DELIMITER |
+CREATE TRIGGER upKilledMonsters AFTER UPDATE ON monsters
+FOR EACH ROW
+BEGIN
+IF(NEW.hero_id!=NULL)
+THEN
+UPDATE heroes
+    SET killedMonsters = killedMonsters + 1
+    WHERE id = NEW.hero_id;
+END IF;
+END |
+DELIMITER ;
+
+UPDATE monsters SET hero_id = 1 WHERE id = 3;
+
+#Да се направи тригер, който да проверява при всяка промяна на броя на убитите монстри на даден герой, дали той е убил повече от 
+#10 монстъра и да му дава автоматично специален награден артефакт.
+CREATE TABLE awards(
+id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+reward INT DEFAULT 0,
+id_hero INT,
+CONSTRAINT FOREIGN KEY (id_hero) REFERENCES heroes(id) ON UPDATE CASCADE ON DELETE SET NULL
+);
+
+DELIMITER |
+CREATE TRIGGER addRewards AFTER UPDATE ON heroes
+FOR EACH ROW
+BEGIN
+IF (NEW.killedMonsters%10=0)
+THEN
+IF ((SELECT COUNT(*) FROM awards WHERE id_hero = NEW.id)=0) 
+THEN INSERT INTO awards (reward, id_hero) VALUES (1, NEW.id);
+ELSE UPDATE awards SET reward = reward+1 WHERE id_hero = NEW.id;
+END IF;
+END IF;
+END |
+DELIMITER ;
+
+UPDATE heroes SET killedMonsters = killedMonsters + 1 WHERE id = 4;
+
+#Да се направи тригер, който да изтрива всички монстри, които са останали в таблицата "monsters", когато е изтрит даден герой.
+DELIMITER |
+CREATE TRIGGER deleteMonsters BEFORE DELETE ON heroes
+FOR EACH ROW
+BEGIN
+DELETE FROM monsters WHERE monsters.hero_id = OLD.id;
+END |
+DELIMITER ;
+
+DELETE FROM heroes WHERE id = 1;
+
+#Да се направи тригер, който да предотвратява изтриването на всички мисии от таблицата "missions", когато има герой, който е участвал в тях.
+DELIMITER |
+CREATE TRIGGER cantDeleteMissions BEFORE DELETE ON missions
+FOR EACH ROW BEGIN
+DECLARE br INT;
+SELECT COUNT(*) INTO br FROM heroes_missions WHERE id_mission = OLD.id;
+IF(br!=0)
+THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = "can't delete mission!";
+END IF;
+END |
+DELIMITER ;
+
+#DELETE FROM missions WHERE id = 2;
+
+#Да се направи тригер, който да вкарва нови записи в таблица users само ако въведената възраст на потребителя е над 12 години.
+DELIMITER |
+CREATE TRIGGER checkAge BEFORE INSERT ON users 
+FOR EACH ROW 
+BEGIN
+DECLARE age INT;
+SET age = (YEAR(NOW())-NEW.yearOfBirthday);
+IF(age<12)
+THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'you are yonger than 12YO!';
+END IF;
+END |
+DELIMITER ;
+
+INSERT INTO users (name, password, yearOfBirthday) VALUES ('Vancho1', '123', 1990);
+
+#Да се направи тригер, който да променя стойността на атаката на герой в таблица heroes на половината, ако героят е от тип "замръзвач" и магическите му точки (magicPoints) са по-малко от 10.
+DELIMITER |
+CREATE TRIGGER check_hero_frozen_attack
+BEFORE UPDATE ON heroes
+FOR EACH ROW
+BEGIN
+    IF (NEW.isWizard = TRUE AND NEW.magicPoints < 10)
+    THEN
+        SET NEW.frozenAtack_protection = NEW.frozenAtack_protection / 2;
+    END IF;
+END |
+DELIMITER ;
+
+UPDATE heroes SET heroes.name = "Gandalfeca" WHERE id = 5;
+
+#променяме атаката на героите на всеки 10 убити чудовища
+DELIMITER |
+CREATE TRIGGER addAtackPoints BEFORE UPDATE ON heroes
+FOR EACH ROW
+BEGIN
+IF (NEW.killedMonsters%10=0)
+THEN
+SET NEW.atack = OLD.atack+1;
+END IF;
+END |
+DELIMITER ;
+
+UPDATE heroes SET killedMonsters = killedMonsters + 1 WHERE id = 4;
+
+#Тригер, който да премахва героя от мисията, ако той умре по време на нея
+DELIMITER |
+CREATE TRIGGER removeHero AFTER UPDATE ON heroes 
+FOR EACH ROW
+BEGIN
+IF(NEW.blood<=0)
+THEN DELETE FROM heroes_missions WHERE id_hero=NEW.id;
+END IF;
+END |
+DELIMITER ;
+
+UPDATE heroes SET blood = 0 WHERE id = 6; 
+
+CREATE TABLE updatedHeroesMissions(
+oldMissionID INT NOT NULL,
+newMissionID INT NOT NULL,
+oldHeroID INT NOT NULL,
+newHeroID INT NOT NULL,
+dateUpdated DATETIME DEFAULT NOW()
+);
+
+DELIMITER |
+CREATE TRIGGER updateMissins BEFORE UPDATE ON heroes_missions 
+FOR EACH ROW
+BEGIN
+INSERT INTO updatedHeroesMissions(oldMissionID, newMissionID, oldHeroID, newHeroID) VALUES(OLD.id_mission, NEW.id_mission, OLD.id_hero, NEW.id_hero);
+END |
+DELIMITER ;
+
+UPDATE heroes_missions SET id_mission = 2 WHERE id_hero=3 AND id_mission=12;
 
 #9. Създайте процедура, в която демонстрирате използване на курсор - променяме кръвта на всеки герой, участвал в определена мисия с 50 нагоре
 DELIMITER //
@@ -440,7 +599,7 @@ BEGIN
         WHERE heroes_missions.id_mission = id_mission_out;
         
     DECLARE CONTINUE HANDLER FOR NOT FOUND SET done = 1;
-
+	SET done = 0;
     OPEN hero_cursor;
     hero_loop: WHILE(done = 0)
 		DO
@@ -459,6 +618,119 @@ END//
 
 DELIMITER ;
 
-CALL update_heroes_blood(4);
+#CALL update_heroes_blood(4);
 
 SELECT heroes.name, heroes.blood FROM heroes;
+
+#Направете процедура, която приема като входен параметър име на потребител и извежда всички герои на този потребител, които имат по-малко от 5 убити чудовища
+DELIMITER |
+CREATE PROCEDURE heroesName(IN nameParam VARCHAR(255))
+BEGIN
+    DECLARE done INT;
+    DECLARE h_name VARCHAR(255);
+    DECLARE h_blood INT;
+    DECLARE km_hero INT;
+    DECLARE u_name VARCHAR(255);
+
+    DECLARE heroesNameByUser CURSOR FOR
+        SELECT heroes.name, heroes.blood, heroes.killedMonsters, users.name
+        FROM heroes JOIN users ON users.id = heroes.user_id 
+        WHERE users.name = nameParam AND heroes.killedMonsters < 5;
+
+    DECLARE CONTINUE HANDLER FOR NOT FOUND SET done = 1;
+
+    CREATE TEMPORARY TABLE heroesUser (
+        id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        heroName VARCHAR(255),
+        blood INT,
+        killedMonsters INT,
+        username VARCHAR(255)
+    ) ENGINE = MEMORY;
+
+    SET done = 0;
+    OPEN heroesNameByUser;
+    
+    whileLoop: WHILE (done = 0) DO
+        IF (done = 1) THEN 
+            LEAVE whileLoop; 
+        END IF;
+        FETCH heroesNameByUser INTO h_name, h_blood, km_hero, u_name;
+        INSERT INTO heroesUser (heroName, blood, killedMonsters, username)
+        VALUES (h_name, h_blood, km_hero, u_name);
+    END WHILE;
+    SELECT * FROM heroesUser;
+    DROP TABLE heroesUser;
+    CLOSE heroesNameByUser;
+END |
+
+DELIMITER ;
+
+SET @user_name = 'Bob';
+
+CALL heroesName (@user_name);
+
+#Направете процедура, която приема като входен параметър мисия и извежда всички герои, които участват в тази мисия.
+DELIMITER |
+CREATE PROCEDURE missionAndHeroes(IN missionName VARCHAR(255))
+BEGIN
+DECLARE m_name VARCHAR(255);
+DECLARE h_name VARCHAR(255);
+DECLARE u_name VARCHAR(255);
+DECLARE done INT;
+DECLARE missionAndHeroes CURSOR FOR SELECT missions.name, heroes.name, users.name 
+FROM missions JOIN heroes_missions ON missions.id = heroes_missions.id_mission 
+JOIN heroes ON heroes.id = heroes_missions.id_hero
+JOIN users ON users.id = heroes.user_id WHERE missions.name = missionName;
+DECLARE CONTINUE HANDLER FOR NOT FOUND SET done = 1;
+CREATE TEMPORARY TABLE m_h_u(
+id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+mission VARCHAR(255),
+hero VARCHAR(255),
+user VARCHAR(255)
+)ENGINE = MEMORY;
+SET done = 0;
+OPEN missionAndHeroes;
+whileLoop: WHILE(done=0)
+DO
+IF(done = 1) THEN LEAVE whileloop; END IF;
+FETCH missionAndHeroes INTO m_name, h_name, u_name;
+INSERT INTO m_h_u (mission, hero, user) VALUES(m_name, h_name, u_name);
+END WHILE;
+SELECT * FROM m_h_u;
+DROP TABLE m_h_u;
+CLOSE missionAndHeroes;
+END |
+DELIMITER ;
+
+SET @missionName = 'Collecting herbs';
+
+CALL missionAndHeroes (@missionName);
+
+#Направете процедура, която приема като входен параметър име на герой и увеличава неговия брой убити чудовища с 1.
+DELIMITER |
+CREATE PROCEDURE upKilledMonsters(IN nameHero VARCHAR(255), IN username VARCHAR(255))
+BEGIN
+DECLARE heroID INT;
+DECLARE h_name VARCHAR(255);
+DECLARE h_km INT;
+DECLARE done INT;
+DECLARE changeKM CURSOR FOR SELECT heroes.id, heroes.name, heroes.killedMonsters FROM heroes
+JOIN users ON users.id = heroes.user_id
+WHERE heroes.name = nameHero AND users.name=username;
+DECLARE CONTINUE HANDLER FOR NOT FOUND SET done = 1;
+SET done = 0;
+OPEN changeKM;
+whileloop: WHILE(done=0)
+DO
+IF(done=1) THEN LEAVE whileloop; END IF;
+FETCH changeKM INTO heroID, h_name, h_km;
+UPDATE heroes SET killedMonsters = killedMonsters+1 WHERE id = heroID;
+END WHILE;
+CLOSE changeKM;
+END |
+DELIMITER ;
+
+SET @username = 'Alice';
+SET @heroname = 'Aragorn';
+CALL upKilledMonsters(@heroname, @username);
+

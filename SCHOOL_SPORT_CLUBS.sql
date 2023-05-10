@@ -8,7 +8,7 @@ name VARCHAR(255) NOT NULL,
 egn VARCHAR(10) NOT NULL UNIQUE,
 address VARCHAR(255) NOT NULL,
 phone VARCHAR(20) NULL DEFAULT NULL,
-class VARCHAR(10) NULL DEFAULT NULL
+class INT NULL DEFAULT NULL
 );
 
 CREATE TABLE sportGroups(
@@ -934,7 +934,56 @@ STARTS '2016-05-01 06:05:00'
 DO
 BEGIN
 CALL OPTIMIZED_monthHonorariumPayment(MONTH(NOW()),YEAR(NOW()));
-END;
+END
 |
 delimiter ;
 
+#курсор
+ALTER TABLE sportgroups
+ADD testCursorFlag INT;
+
+CREATE TABLE locationTime(
+id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+location VARCHAR(255),
+timeHour TIME
+);
+
+delimiter |
+CREATE PROCEDURE testCursorForSportgroups()
+BEGIN
+DECLARE done INT;
+DECLARE loc VARCHAR(255);
+DECLARE timeTraining TIME;
+DECLARE cursorFlag CURSOR FOR SELECT location, hourOfTraining FROM sportgroups;
+DECLARE CONTINUE HANDLER FOR NOT FOUND SET done = 1;
+OPEN cursorFlag;
+SET done = 0;
+cursor_loop: WHILE(done=0)
+DO
+FETCH cursorFlag INTO loc, timeTraining;
+IF(done=1)
+THEN LEAVE cursor_loop;
+ELSE 
+	INSERT INTO locationTime(location, timeHour) VALUES (loc, timeTraining);
+    UPDATE sportgroups SET testCursorFlag = 1 WHERE location=loc AND hourOfTraining=timeTraining;
+END IF;
+END WHILE;
+CLOSE cursorFlag;
+END |
+DELIMITER ;
+
+CALL testCursorForSportgroups();
+SELECT * FROM locationTime;
+
+#тригер
+DELIMITER |
+CREATE TRIGGER validateStudent BEFORE INSERT ON students
+FOR EACH ROW 
+BEGIN
+IF (CHAR_LENGTH(NEW.egn) != 10 OR (NEW.class NOT BETWEEN 1 AND 12))
+THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = "incorect data input!";
+END IF;
+END |
+DELIMITER ;
+
+INSERT INTO students(name, egn, address, phone, class) VALUES ("Dragancho", "1234500089", "Sofia", "0884462453", 0);
